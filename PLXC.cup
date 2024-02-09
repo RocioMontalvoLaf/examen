@@ -1,0 +1,208 @@
+import java.io.*;
+import java_cup.runtime.*;
+
+
+parser code {:
+    public void syntax_error(Symbol s){
+        System.err.println("Error token " + s);
+    }
+
+    public void unrecovered_syntax_error(Symbol s){
+        System.err.println("Error token " + s);
+        done_parsing();
+    }
+:};
+
+
+/* TERMINALES */
+terminal IF, AP, CP, AC, CC, ELSE, WHILE, DO, FOR, PYC, PRINT, DIF, IGUAL, LENGTH;
+terminal MAS, MENOS, DIV, POR, ASIG, MAYOR, MENOR, MENORIGUAL, IMPLICA;
+terminal MAYORIGUAL, NOT, ALL, CLL, AND, OR, COMA, CASTCHAR, CASTINT, CASTFLOAT, FORALL, FROM, TO, STEP;
+terminal INT, CHAR, FLOAT, STRING, BOOLEAN;
+terminal String IDENT, NUM, REAL, ASCII, CADENA, TRUE;
+terminal MENOSUNARIO;
+terminal DIMPLICA;
+
+/* NOT TERMINALES */
+non terminal ini;
+non terminal AST listaSent, forAllExp, sent, exp, boolexp, cond, elseSent, expFor, listaEnteros, listaChar, listaReales, listaBool, arrayIni, pArrayIni, expString;
+
+/* PRECEDENCIAS */
+
+precedence right IMPLICA;
+precedence right ASIG;
+precedence left COMA;
+precedence nonassoc FORALL;
+precedence right FROM, TO, STEP;
+precedence right DIMPLICA;
+precedence left OR, AND;
+precedence right NOT; // Ensure NOT has higher precedence than AND
+precedence left IGUAL, MAYOR, MENOR, MAYORIGUAL, MENORIGUAL, DIF;
+precedence left MAS, MENOS;
+precedence left POR, DIV;
+precedence left AP, CP, AC, CC;
+precedence nonassoc MENOSUNARIO; // You might want to ensure this is correctly positioned in precedence if used for unary minus
+precedence left CASTCHAR, CASTINT, CASTFLOAT;
+precedence nonassoc IF, ELSE;
+
+
+
+
+/* REGLAS */
+
+
+ini			::= listaSent:e							{: AST a = new AST("ini", e, null); a.gc(); :}
+			;
+
+listaSent	::=	listaSent:e1 sent:e2				{: RESULT = new AST("sent", e1, e2); :}
+	 		| 	sent:e								{: RESULT = new AST("sent", e, null); :}
+			;
+
+sent		::=		PRINT AP exp:e CP PYC			{: RESULT = new AST("print", e, null); :}
+			|   PRINT AP cond:c CP PYC				{: RESULT = new AST("printcond", c, null); :}
+			|   PRINT AP boolexp:b CP PYC			{: RESULT = new AST("printcond", b, null); :}
+			|	PRINT AP ALL pArrayIni:a CLL CP PYC	{: RESULT = new AST("printArray", a ,null); :}
+			|	exp:e PYC							{: RESULT = e; :}
+			|	ALL listaSent:e CLL					{: RESULT = e; :}
+			|   IF AP boolexp:b CP elseSent:e 	 	{: RESULT = new AST("if", b, e); :}
+			|	IF AP cond:c CP elseSent:e			{: RESULT = new AST("if", c, e); :}
+			|   IF AP forAllExp:f CP elseSent:e		{: RESULT = new AST("if", f, e); :}
+			|	DO sent:s WHILE AP cond:c CP PYC	{: RESULT = new AST("doWhile",c,s); :}
+			|	WHILE AP cond:c CP sent:s			{: RESULT = new AST("while",c,s);  :}	
+			|	FOR AP expFor:e CP sent:s			{: RESULT = new AST("for", e, s);  :} 	
+			;
+
+			
+boolexp     ::= exp:e                             	{: RESULT = new AST("bool", e, null); :}
+            |   NOT exp:e                      		{: RESULT = new AST("not", new AST("bool", e, null), null); :}  %prec NOT
+			|   boolexp:b1 AND boolexp:b2           {: RESULT = new AST("and", b1, b2); :}
+            |   boolexp:b1 OR boolexp:b2            {: RESULT = new AST("or", b1, b2); :}
+            |   boolexp:c1 IMPLICA boolexp:c2       {: RESULT = new AST("implica", c1, c2); :}
+            |   cond:c AND boolexp:b                {: RESULT = new AST("and", c, b); :}
+            |   cond:c OR boolexp:b                 {: RESULT = new AST("or", c, b); :}
+            |   boolexp:b AND cond:c                {: RESULT = new AST("and", b, c); :}
+            |   boolexp:b OR cond:c                 {: RESULT = new AST("or", b, c); :}	
+			|   IDENT:i OR boolexp:b                {: RESULT = new AST("or", new AST("bool", new AST(i,null, null),null), b); :}
+            |   IDENT:i AND boolexp:b               {: RESULT = new AST("and", new AST("bool", new AST(i,null, null),null), b); :}
+            |   AP boolexp:b CP                     {: RESULT = b; :}
+			|   TRUE:t1 IMPLICA TRUE:t2				{: RESULT = new AST("implica", new AST(t1, null, null), new AST(t2, null, null)); :}
+			 |   boolexp:c1 DIMPLICA boolexp:c2                {: RESULT = new AST("and", new AST("or", new AST("not", c1, null), c2),
+                         			                                                new AST("or", new AST("not", c2, null), c1)); :}
+
+			;
+
+forAllExp	::= FORALL IDENT:i COMA boolexp:b       {: RESULT = new AST("forall", new AST(i, null, null), b); :}
+            |	FORALL IDENT:i FROM exp:e1 TO exp:e2
+					COMA cond:c 					{: RESULT = new AST("forallInt", new AST(i, e1, e2), c); :} 	%prec FORALL
+			|   FORALL IDENT:i FROM exp:e1 TO exp:e2
+					COMA boolexp:b 					{: RESULT = new AST("forallInt", new AST(i, e1, e2), b); :}		%prec FORALL
+			|	FORALL IDENT:i FROM exp:e1 TO exp:e2
+					STEP exp:e3 COMA cond:c 		{: RESULT = new AST("forallIntStep", new AST(i, e1, e2), new AST("step", e3, c)); :}	%prec FORALL
+			|   FORALL IDENT:i FROM exp:e1 TO exp:e2
+					 COMA forAllExp:f				{: RESULT = new AST("forallInt", new AST(i, e1, e2), f); :}	%prec FORALL		
+			;
+			
+elseSent	::=		sent:e1 ELSE sent:e2			{: RESULT = new AST("else", e1, e2); :}
+			|	sent:e								{: RESULT = new AST("else", e, null); :}
+			;
+			
+expFor		::=	exp:e1 PYC cond:c PYC exp:e2		{: RESULT = new AST("expFor", c, new AST("aux", e1, e2)); :}
+			|	exp:e1 PYC boolexp:b PYC exp:e2		{: RESULT = new AST("expFor", b, new AST("aux", e1, e2)); :}	
+			|	PYC cond:c PYC exp:e2				{: RESULT = new AST("expFor", c, new AST("aux", null, e2)); :}
+			|	exp:e1 PYC boolexp:b PYC			{: RESULT = new AST("expFor", b, new AST("aux", e1, null)); :}
+			|	exp:e1 PYC cond:c PYC				{: RESULT = new AST("expFor", c, new AST("aux", e1, null)); :}
+			|	  PYC cond:c PYC					{: RESULT = new AST("expFor", c, new AST("aux", null, null)); :}		
+			;
+
+exp			::=	NUM:n									{: RESULT = new AST("num", new AST(n, null, null), null ); :}
+			|	REAL:r									{: RESULT = new AST("real", new AST(r, null, null), null ); :}
+			|	ASCII:a									{: RESULT = new AST("ascii", new AST(a, null, null), null ); :}
+			|	INT listaEnteros:l						{: RESULT = new AST("int", l, null); :}
+			|	CHAR listaChar:l 						{: RESULT = new AST("char", l, null); :}
+			|  	BOOLEAN	listaBool:l						{: RESULT = new AST("boolean", l, null); :}
+			|   FLOAT listaReales:l						{: RESULT = new AST("float", l, null); :}
+			|   STRING expString:e						{: RESULT = new AST("string", e, null); :}
+			|   CASTCHAR exp:e 							{: RESULT = new AST("castChar", e, null); :}
+			|   CASTINT exp:e 							{: RESULT = new AST("castInt", e, null); :}
+			|   CASTFLOAT exp:e 						{: RESULT = new AST("castFloat", e, null); :}
+			|	exp:e1 MAS exp:e2						{: RESULT = new AST("mas", e1, e2); :}
+			|	exp:e1 MENOS exp:e2						{: RESULT = new AST("menos", e1, e2); :}
+			|	exp:e1 POR exp:e2						{: RESULT = new AST("por", e1, e2); :}
+			|	exp:e1 DIV exp:e2						{: RESULT = new AST("div", e1, e2); :}
+			|	MENOS exp:e								{: RESULT = new AST("menosUnario", e, null); :}		%prec MENOSUNARIO
+			|	IDENT:i ASIG exp:e 						{: RESULT = new AST("asig", new AST(i, null, null), e); :}
+			|	IDENT:i ASIG TRUE:t						{: RESULT = new AST("asigBool", new AST(i, null, null), new AST(t, null, null)); :}	
+			|	IDENT:i ASIG cond:c						{: RESULT = new AST("asigBool", new AST(i, null, null), c); :}
+			|   IDENT:i ASIG NOT exp:e					{: RESULT = new AST("asigBool", new AST(i, null, null), new AST("not", e, null)); :}	
+			|	IDENT:i AC exp:e CC						{: RESULT = new AST("arrayPos", new AST(i, null, null), e); :}
+			|   IDENT:i AC NUM:n CC ASIG exp:e			{: RESULT = new AST("arrayAsig", new AST(i, new AST(n, null, null), null), e); :}
+			|	IDENT:i AC exp:e1 CC ASIG exp:e2		{: RESULT = new AST("arrayAsig", new AST(i, e1, null), e2); :}
+			|	IDENT:i ASIG ALL arrayIni:a CLL			{: RESULT = new AST("iniArray", new AST(i, null, null), a); :}
+			|	IDENT:i									{: RESULT = new AST("ident", new AST(i, null, null), null); :}
+			|	AP exp:e CP								{: RESULT = e; :}	
+			|   IDENT:i LENGTH							{: RESULT = new AST("length", new AST(i, null, null), null); :}
+			|   CADENA:c								{: RESULT = new AST("cadena", null, new AST(c, null, null)); :}
+			;
+
+cond		::=		exp:e1 IGUAL exp:e2					{: RESULT = new AST("igual", e1, e2); :}
+			|	exp:e1 DIF exp:e2						{: RESULT = new AST("distinto", e1, e2); :}
+			|	exp:e1 MENOR exp:e2						{: RESULT = new AST("menor", e1, e2); :}
+			|	exp:e1 MENORIGUAL exp:e2				{: RESULT = new AST("menorIgual", e1, e2); :}
+			|	exp:e1 MAYOR exp:e2						{: RESULT = new AST("mayor", e1, e2); :}
+			|	exp:e1 MAYORIGUAL exp:e2				{: RESULT = new AST("mayorIgual", e1, e2); :}
+			| 	cond:c1 AND cond:c2						{: RESULT = new AST("and", c1, c2); :}
+			| 	cond:c AND forAllExp:f					{: RESULT = new AST("and", c, f); :}
+			| 	cond:c1 OR cond:c2						{: RESULT = new AST("or", c1, c2); :}
+			|   cond:c1 IMPLICA cond:c2					{: RESULT = new AST("implica", c1, c2); :}
+			|	NOT cond:c								{: RESULT = new AST("not", c, null); :}   %prec NOT
+			|	AP cond:c CP							{: RESULT = c; :}
+			|   cond:c1 DIMPLICA cond:c2                {: RESULT = new AST("and", new AST("or", new AST("not", c1, null), c2),
+            			                                                new AST("or", new AST("not", c2, null), c1)); :}
+            		
+			;
+listaEnteros::=	IDENT:i                             	{: RESULT = new AST("intIdent", null, new AST(i, null, null)); :}
+			|  IDENT:i COMA listaEnteros:l				{: RESULT = new AST("intIdent", l, new AST(i, null, null)); :}
+			|  IDENT:i ASIG exp:e 						{: RESULT = new AST("asigInt", null, new AST(i,e,null)); :}
+			|  IDENT:i ASIG exp:e COMA listaEnteros:l	{: RESULT = new AST("asigInt", l, new AST(i,e,null)); :}
+			|  IDENT:i AC NUM:n CC						{: RESULT = new AST("arrayInt", new AST(i, null, null), new AST(n,null,null)); :}
+			;
+
+listaChar	::=	IDENT:i                             	{: RESULT = new AST("charIdent", null, new AST(i, null, null)); :}	
+			|  IDENT:i COMA listaChar:l					{: RESULT = new AST("charIdent", l, new AST(i, null, null)); :}
+			|  IDENT:i ASIG exp:e 						{: RESULT = new AST("asigChar", null, new AST(i,e,null)); :}
+			|  IDENT:i ASIG exp:e COMA listaChar:l		{: RESULT = new AST("asigChar", l, new AST(i,e,null)); :}
+			|  IDENT:i AC NUM:n CC						{: RESULT = new AST("arrayChar", new AST(i, null, null), new AST(n,null,null)); :}
+			|  IDENT:i AC NUM:n CC ASIG ALL arrayIni:a CLL	{: RESULT = new AST("iniAsigArrayCh",new AST("iniArray", new AST(i, null, null),a), 
+																			new AST("arrayChar", new AST(i, null, null), new AST(n,null,null))); :}
+			;
+
+listaReales	::=	IDENT:i                             	{: RESULT = new AST("floatIdent", null, new AST(i, null, null)); :}
+			|  IDENT:i COMA listaReales:l				{: RESULT = new AST("floatIdent", l, new AST(i, null, null)); :}
+			|  IDENT:i ASIG exp:e 						{: RESULT = new AST("asigFloat", null, new AST(i,e,null)); :}
+			|  IDENT:i ASIG exp:e COMA listaReales:l	{: RESULT = new AST("asigFloat", l, new AST(i,e,null)); :}
+			|  IDENT:i AC NUM:n CC						{: RESULT = new AST("arrayFloat", new AST(i, null, null), new AST(n,null,null)); :}
+			;
+
+listaBool	::= IDENT:i									{: RESULT = new AST("boolIdent", null, new AST(i, null, null)); :}
+			|  IDENT:i COMA listaBool:l					{: RESULT = new AST("boolIdent", l, new AST(i, null, null)); :}
+			|  IDENT:i ASIG TRUE:t						{: RESULT = new AST("asigBool", new AST(i, null, null), new AST(t, null, null)); :}
+			|  IDENT:i ASIG cond:c						{: RESULT = new AST("asigBool", new AST(i, null, null), c); :}
+			;
+
+arrayIni 	::= exp:e COMA arrayIni:a					{: RESULT = new AST("arrayIni", e, a); :}
+			| 	exp:e									{: RESULT = new AST("arrayIni", e, null); :}
+			;
+
+pArrayIni	::= exp:e COMA pArrayIni:a					{: RESULT = new AST("pArrayIni", e, a); :}
+			| 	exp:e									{: RESULT = new AST("pArrayIni", e, null); :}
+			;
+
+expString	::= IDENT:i ASIG exp:e						{: RESULT = new AST("asigString", new AST(i ,e ,null), null); :}
+			|   IDENT:i ASIG exp:e COMA expString:e2	{: RESULT = new AST("asigString", new AST(i ,e ,null),  e2); :}
+			;
+
+
+
+
+
+
